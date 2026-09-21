@@ -24,7 +24,7 @@ void 			 free_list(struct reference *);
 int 			 create_key(struct reference *, struct reference *);
 void 			 read_key(struct reference *, char *);
 int 			 delete_key(struct reference **, char *);
-
+void 			 list_keys(struct reference *);
 int 			 write_list(char *, struct reference *);
 
 int
@@ -35,17 +35,17 @@ main(int argc, char *argv[])
 	int ret;
 	char *arg;
 
-	int cflag, dflag, rflag, uflag;
+	int cflag, dflag, lflag, rflag, uflag;
 	char *dbpath, *inpath;
 	struct reference *dblist, *inlist;
 
 	ret = EXIT_SUCCESS;
 	modified = 0;
-	cflag = dflag = rflag = uflag = 0;
+	cflag = dflag = lflag = rflag = uflag = 0;
 	dbpath = inpath = NULL;
 	dblist = inlist = NULL;
 	
-	while ((c = getopt(argc, argv, "c:d:f:hr:u:")) != -1) {
+	while ((c = getopt(argc, argv, "c:d:f:hlr:u:")) != -1) {
 		switch (c) {
 		case 'c':
 			cflag = 1;
@@ -61,6 +61,9 @@ main(int argc, char *argv[])
 		case 'h':
 			usage();
 			exit(EXIT_SUCCESS);
+		case 'l':
+			lflag = 1;
+			break;
 		case 'r':
 			rflag = 1;
 			arg = optarg;
@@ -89,7 +92,7 @@ main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (cflag + dflag + rflag + uflag != 1) {
+	if (cflag + dflag + lflag + rflag + uflag != 1) {
 		warnx("too many options");
 		usage();
 		exit(EXIT_FAILURE);
@@ -116,6 +119,8 @@ main(int argc, char *argv[])
 			ret = EXIT_FAILURE;
 		}
 		modified += 1;
+	} else if (lflag) {
+		list_keys(dblist);
 	} else if (rflag) {
 		read_key(dblist, arg);
 	} else if (uflag) {
@@ -160,14 +165,14 @@ parse_bib(char *path)
 		return NULL;
 	}
 
-	line = depth = 0;
+	line = depth = inflag = 0;
 	rhead = rlast = NULL;
 	while ((c = fgetc(fp)) != EOF) {
 		if (c == '\n')
 			line += 1;
-		else if (c == '{')
+		else if (inflag && c == '{')
 			depth++;
-		else if (c == '}') {
+		else if (inflag && c == '}') {
 			if (depth == 0) 
 				errx(EXIT_FAILURE, "unbalanced curly braces at line: %d", line);
 			depth--;
@@ -269,6 +274,14 @@ create_key(struct reference *dblist, struct reference *inlist)
 }
 
 void
+list_keys(struct reference *dblist)
+{
+	struct reference *p;
+	for (p = dblist; p; p = p->next)
+		printf("%s\n", p->key);
+}
+
+void
 read_key(struct reference *dblist, char *key)
 {
 	struct reference *p;
@@ -361,4 +374,5 @@ usage(void)
     fprintf(stderr, "  -r key      read: print entry for this key ('-' prints all)\n");
     fprintf(stderr, "  -u key      update: replace entry 'key' with an entry read from stdin\n");
     fprintf(stderr, "  -d key      delete: remove entry with this key\n");
+    fprintf(stderr, "  -l          list: list all keys\n");
 }
