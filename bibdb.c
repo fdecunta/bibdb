@@ -1,12 +1,19 @@
 #include <err.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
+struct reference {
+	char *type;
+	char *key;
+	char *content;
+};
+
 void 	usage(void);
+void 	parse_bib(FILE *);
 
 char *dbpath = "/home/fd/bibdb/foo.bib";
-
 int cflag;
 int dflag;
 int rflag;
@@ -57,21 +64,65 @@ main(int argc, char *argv[])
 	// TODO: for the moment only 'r' mode, but need 'w' for the rest.
 	if ((fp = fopen(dbpath, "r")) == NULL)
 		err(EXIT_FAILURE, "cannot open %s", dbpath);
-	
-	ssize_t nread;
-	size_t len = 0;
-	char *line = NULL;
- 
-	while ((nread = getline(&line, &len, fp)) != -1) {
-		puts(line);
-	} 
 
-	free(line);
+	parse_bib(fp);
+	
 	fclose(fp);
 	exit(EXIT_SUCCESS);
 }
 
-// TODO: parse this stuff!
+void
+parse_bib(FILE *fp)
+{
+	ssize_t len;
+	size_t linesz = 0;
+	char *line = NULL;
+
+	/* 
+	 * TODO: cannot use getline because stuff can come in multiple lines. 
+	 * need to do something with {} and depth levels.
+	 */
+
+	char *sp, *ep;
+	while ((len = getline(&line, &linesz, fp)) != -1) {
+		if (line[len - 1] == '\n')
+			line[--len] = '\0';
+
+		struct reference *r;
+		r = (struct reference *) malloc(sizeof(struct reference));
+
+		if ((r->content = strdup(line)) == NULL) 
+			// here it leaks r, maybe free
+			err(EXIT_FAILURE, "cannot allocate space for strdup");
+		
+		sp = strchr(line, '@');
+		ep = strchr(line, '{');
+		if (sp == NULL || ep == NULL) {
+			warnx("cannot parse line: \n%s", line);
+			free(r);
+			continue;
+		}
+		sp++; 	/* pass the at */
+		r->type = strndup(sp, (size_t)(ep - sp)); 
+
+		sp = ep;
+		ep = strchr(sp, ',');
+		if (ep == NULL) {
+			warnx("cannot parse line: \n%s", line);
+			free(r);
+			continue;
+		}
+		sp++; 	/* pass the '{' */
+		r->key = strndup(sp, (size_t)(ep - sp)); 
+
+		printf("%s\n", r->type);
+		printf("%s\n", r->key);
+
+		free(r);
+	} 
+
+	free(line);
+}
 
 void
 usage(void)

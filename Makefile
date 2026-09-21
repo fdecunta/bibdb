@@ -18,4 +18,7 @@ install: $(PROG)
 remove:
 	rm -f $(BIN)/$(PROG)
 
+run: $(PROG)
+	./$(PROG) -f vks.bib -r foo
+
 .PHONY: install remove clean 
