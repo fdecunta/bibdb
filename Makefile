@@ -19,7 +19,6 @@ remove:
 	rm -f $(BIN)/$(PROG)
 
 run: $(PROG)
-#	./$(PROG) -f foo.bib -r -
 	./$(PROG) -f bla.bib -c vks.bib
 
 mem: $(PROG)

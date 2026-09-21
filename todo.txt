@@ -1,1 +1,0 @@
-- A minimal CRUD database for bib

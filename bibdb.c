@@ -23,6 +23,7 @@ struct reference 	*new_ref(char *);
 void 			 free_list(struct reference *);
 int 			 create_key(struct reference *, struct reference *);
 void 			 read_key(struct reference *, char *);
+int 			 delete_key(struct reference *, char *);
 
 int 			 write_list(char *, struct reference *);
 
@@ -30,6 +31,8 @@ int
 main(int argc, char *argv[])
 {
 	int c;
+	int modified;
+	int ret;
 	char *arg;
 
 	int cflag;
@@ -39,6 +42,8 @@ main(int argc, char *argv[])
 	char *dbpath, *inpath;
 	struct reference *dblist, *inlist;
 
+	ret = EXIT_SUCCESS;
+	modified = 0;
 	cflag = dflag = rflag = uflag = 0;
 	dbpath = inpath = NULL;
 	dblist = inlist = NULL;
@@ -101,36 +106,37 @@ main(int argc, char *argv[])
 		inlist = parse_bib(inpath);
 		if (!inlist) {
 			warnx("failed to read references from %s", inpath);
-			free_list(dblist);
-			exit(EXIT_FAILURE);
+			ret = EXIT_FAILURE;
 		}
-
 		if (create_key(dblist, inlist) == 0) {
 			warnx("no references added");
-			free_list(dblist);
-			free_list(inlist);
-			exit(EXIT_FAILURE);
+			ret = EXIT_FAILURE;
 		}
-
-		if ((write_list(dbpath, dblist)) < 1) {
-			warnx("failed during writing");
-			free_list(dblist);
-			free_list(inlist);
-			exit(EXIT_FAILURE);
-		}
+		modified += 1;
 	} else if (dflag) {
-		return 0;
+		if ((delete_key(dblist, arg)) == -1) {
+			fprintf(stderr, "key not found: %s\n", arg);
+			ret = EXIT_FAILURE;
+		}
+		modified += 1;
 	} else if (rflag) {
 		read_key(dblist, arg);
 	} else if (uflag) {
 		return 0;
 	}
 
+	if (modified) {
+		if ((write_list(dbpath, dblist)) < 1) {
+			warnx("failed during writing");
+			ret = EXIT_FAILURE;
+		} 
+	}
+
 	free_list(dblist);
 	if (inlist)
 		free_list(inlist);
 
-	exit(EXIT_SUCCESS);
+	exit(ret);
 }
 
 struct reference *
@@ -281,24 +287,50 @@ read_key(struct reference *dblist, char *key)
 }
 
 int
+delete_key(struct reference *dblist, char *key)
+{
+	struct reference *p, *prev;
+
+	prev = NULL;
+	for (p = dblist; p; p = p->next) {
+		if (!strcmp(key, p->key)) {
+			if (p == dblist) 
+				dblist = p->next;
+			else 
+				prev->next = p->next;
+			printf("Deleted %s\n", p->key);
+			free(p->key);
+			free(p->content);
+			free(p);
+			return 0;
+		}
+		prev = p;
+	}
+	return -1;
+}
+
+int
 write_list(char *path, struct reference *dblist)
 {
-	int writes;
+	int writes = 0;
 	int fd; 	/* file descriptor for tmp file */
-//	FILE *fp; 	
 	struct reference *p;
+	char tmp[] = "bibdb.XXXXXX";
 
-	char template[] = "/tmp/bibdb.XXXXXX";
-	if ((fd = mkstemp(template)) == -1) {
+	if ((fd = mkstemp(tmp)) == -1) {
 		warn("cannot create tmp file");
 		return -1;
 	}
 
-	writes = 0;
 	for (p = dblist; p; p = p->next, writes++)
 		dprintf(fd, "%s\n", p->content); 
+	close(fd);
 	
-	(void)path;
+	if ((rename(tmp, path)) != 0) {
+		warn("cannot overwrite %s", path);
+		unlink(tmp);
+		return -1;
+	}
 
 	return writes;
 }
