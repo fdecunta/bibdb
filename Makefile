@@ -19,6 +19,10 @@ remove:
 	rm -f $(BIN)/$(PROG)
 
 run: $(PROG)
-	./$(PROG) -f vks.bib -r foo
+#	./$(PROG) -f foo.bib -r -
+	./$(PROG) -f bla.bib -c vks.bib
+
+mem: $(PROG)
+	valgrind --leak-check=yes ./$(PROG) -f foo.bib -r -
 
 .PHONY: install remove clean 

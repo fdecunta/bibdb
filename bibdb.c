@@ -4,36 +4,54 @@
 #include <string.h>
 #include <unistd.h>
 
+#define MAX_BUF 4096
+
 struct reference {
-	char *type;
 	char *key;
 	char *content;
+	struct reference *next;
 };
 
-void 	usage(void);
-void 	parse_bib(FILE *);
+struct buffer {
+	char text[MAX_BUF];
+	int pos;
+};
 
-char *dbpath = "/home/fd/bibdb/foo.bib";
-int cflag;
-int dflag;
-int rflag;
-int uflag;
+void 		  	 usage(void);
+struct reference 	*parse_bib(char *);
+struct reference 	*new_ref(char *);
+void 			 free_list(struct reference *);
+int 			 create_key(struct reference *, struct reference *);
+void 			 read_key(struct reference *, char *);
+
+int 			 write_list(char *, struct reference *);
 
 int
 main(int argc, char *argv[])
 {
 	int c;
-	FILE *fp;
+	char *arg;
+
+	int cflag;
+	int dflag;
+	int rflag;
+	int uflag;
+	char *dbpath, *inpath;
+	struct reference *dblist, *inlist;
 
 	cflag = dflag = rflag = uflag = 0;
+	dbpath = inpath = NULL;
+	dblist = inlist = NULL;
 	
 	while ((c = getopt(argc, argv, "c:d:f:hr:u:")) != -1) {
 		switch (c) {
 		case 'c':
 			cflag = 1;
+			inpath = optarg;
 			break;
 		case 'd':
 			dflag = 1;
+			arg = optarg;
 			break;
 		case 'f':
 			dbpath = optarg;
@@ -43,9 +61,11 @@ main(int argc, char *argv[])
 			exit(EXIT_SUCCESS);
 		case 'r':
 			rflag = 1;
+			arg = optarg;
 			break;
 		case 'u':
 			uflag = 1;
+			arg = optarg;
 			break;
 		default:
 			usage();
@@ -55,73 +75,248 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
+	if (argc) {
+		warnx("too many arguments");
+		usage();
+		exit(EXIT_FAILURE);
+	}
+
+	if (!dbpath) {
+		warnx("file not specified");
+		usage();
+		exit(EXIT_FAILURE);
+	}
+
 	if (cflag + dflag + rflag + uflag != 1) {
 		warnx("too many options");
 		usage();
 		exit(EXIT_FAILURE);
 	}
 
-	// TODO: for the moment only 'r' mode, but need 'w' for the rest.
-	if ((fp = fopen(dbpath, "r")) == NULL)
-		err(EXIT_FAILURE, "cannot open %s", dbpath);
+	dblist = parse_bib(dbpath);
+	if (!dblist) 
+		err(EXIT_FAILURE, "failed to read references from %s", dbpath);
 
-	parse_bib(fp);
-	
-	fclose(fp);
+	if (cflag) {
+		inlist = parse_bib(inpath);
+		if (!inlist) {
+			warnx("failed to read references from %s", inpath);
+			free_list(dblist);
+			exit(EXIT_FAILURE);
+		}
+
+		if (create_key(dblist, inlist) == 0) {
+			warnx("no references added");
+			free_list(dblist);
+			free_list(inlist);
+			exit(EXIT_FAILURE);
+		}
+
+		if ((write_list(dbpath, dblist)) < 1) {
+			warnx("failed during writing");
+			free_list(dblist);
+			free_list(inlist);
+			exit(EXIT_FAILURE);
+		}
+	} else if (dflag) {
+		return 0;
+	} else if (rflag) {
+		read_key(dblist, arg);
+	} else if (uflag) {
+		return 0;
+	}
+
+	free_list(dblist);
+	if (inlist)
+		free_list(inlist);
+
 	exit(EXIT_SUCCESS);
 }
 
-void
-parse_bib(FILE *fp)
+struct reference *
+parse_bib(char *path)
 {
-	ssize_t len;
-	size_t linesz = 0;
-	char *line = NULL;
-
 	/* 
-	 * TODO: cannot use getline because stuff can come in multiple lines. 
-	 * need to do something with {} and depth levels.
+	 * read a full entry into a buffer.
+	 * when if ends, find the key in the
+	 * buffer and store it along with the 
+	 * content into a list of references.
 	 */
 
-	char *sp, *ep;
-	while ((len = getline(&line, &linesz, fp)) != -1) {
-		if (line[len - 1] == '\n')
-			line[--len] = '\0';
+	FILE *fp;
+	int c;
+	int line;
+	int depth; 	/* count {} depth */
+	int inflag;	/* 1 if inside a reference */
+	struct reference *rhead, *rlast;
+	struct buffer buf = {0};
 
-		struct reference *r;
-		r = (struct reference *) malloc(sizeof(struct reference));
+	fp = fopen(path, "r+");
+	if (!fp) {
+		warn("cannot open %s", path);
+		return NULL;
+	}
 
-		if ((r->content = strdup(line)) == NULL) 
-			// here it leaks r, maybe free
-			err(EXIT_FAILURE, "cannot allocate space for strdup");
-		
-		sp = strchr(line, '@');
-		ep = strchr(line, '{');
-		if (sp == NULL || ep == NULL) {
-			warnx("cannot parse line: \n%s", line);
-			free(r);
-			continue;
+	line = depth = 0;
+	rhead = rlast = NULL;
+	while ((c = fgetc(fp)) != EOF) {
+		if (c == '\n')
+			line += 1;
+		else if (c == '{')
+			depth++;
+		else if (c == '}') {
+			if (depth == 0) 
+				errx(EXIT_FAILURE, "unbalanced curly braces at line: %d", line);
+			depth--;
 		}
-		sp++; 	/* pass the at */
-		r->type = strndup(sp, (size_t)(ep - sp)); 
 
-		sp = ep;
-		ep = strchr(sp, ',');
-		if (ep == NULL) {
-			warnx("cannot parse line: \n%s", line);
-			free(r);
-			continue;
+		if (!inflag && c == '@')
+			inflag = 1;
+
+		if (inflag)  {
+			if (buf.pos < MAX_BUF)
+				buf.text[buf.pos++] = (char)c;
+			else {
+				warnx("line too long for buffer:\n\n%s...", buf.text);
+				free_list(rhead);
+				fclose(fp);
+				return NULL;
+			}
 		}
-		sp++; 	/* pass the '{' */
-		r->key = strndup(sp, (size_t)(ep - sp)); 
 
-		printf("%s\n", r->type);
-		printf("%s\n", r->key);
+		if (inflag && !depth && c == '\n')  {
+			buf.text[--buf.pos] = '\0';
+			struct reference *r = new_ref(buf.text);
+			if (r == NULL) {
+				warnx("failed to create reference");
+				free_list(rhead);
+				fclose(fp);
+				return NULL;
+			}
 
-		free(r);
+			if (!rhead)
+				rhead = r;
+			if (rlast)
+				rlast->next = r;
+			rlast = r;
+
+			memset(buf.text, '\0', MAX_BUF);
+			buf.pos = 0;
+			inflag = 0;
+		}
 	} 
 
-	free(line);
+	fclose(fp);
+	return rhead;
+}
+
+struct reference *
+new_ref(char *buf)
+{
+	char *sp, *ep;
+	struct reference *r;
+
+	if ((sp = strchr(buf, '{')) == NULL) {
+		warnx("bad formated reference, can't find key");
+		return NULL;
+	}
+	sp++; 	/* set pointer past '{' */
+
+	if ((ep = strchr(sp, ',')) == NULL) {
+		warnx("bad formated reference, can't find key");
+		return NULL;
+	}
+
+	r = (struct reference *) malloc(sizeof(struct reference));
+	r->key = strndup(sp, (size_t)(ep - sp));
+	r->content = strdup(buf);
+	r->next = NULL;
+
+	if (r->key == NULL || r->content == NULL) {
+		warnx("cannot duplicate string");
+		return NULL;
+	}
+
+	return r;
+}
+
+int
+create_key(struct reference *dblist, struct reference *inlist)
+{
+	int changes;
+	struct reference *dbp, *inp;
+
+	changes = 0;
+	for (inp = inlist; inp; inp = inp->next) {
+		for (dbp = dblist; dbp; dbp = dbp->next) {
+			if (!strcmp(inp->key, dbp->key)) {
+				warnx("key already exists: %s", inp->key);
+				break;
+			}
+
+			if (!dbp->next) {
+				dbp->next = new_ref(inp->content);
+				changes += 1;
+				printf("Add %s\n", inp->key);
+				break;
+			}
+		}
+	}
+	return changes;
+}
+
+void
+read_key(struct reference *dblist, char *key)
+{
+	struct reference *p;
+
+	for (p = dblist; p; p = p->next) {
+		if (!strcmp(key, "-"))
+			printf("%s\n", p->content);
+		else if (!strcmp(key, p->key)) {
+			printf("%s\n", p->content);
+			break;
+		}
+	}
+}
+
+int
+write_list(char *path, struct reference *dblist)
+{
+	int writes;
+	int fd; 	/* file descriptor for tmp file */
+//	FILE *fp; 	
+	struct reference *p;
+
+	char template[] = "/tmp/bibdb.XXXXXX";
+	if ((fd = mkstemp(template)) == -1) {
+		warn("cannot create tmp file");
+		return -1;
+	}
+
+	writes = 0;
+	for (p = dblist; p; p = p->next, writes++)
+		dprintf(fd, "%s\n", p->content); 
+	
+	(void)path;
+
+	return writes;
+}
+
+void
+free_list(struct reference *head)
+{
+	if (!head)
+		return;
+
+	struct reference *p, *tmp;
+	for (p = head; p != NULL; p = tmp) {
+		tmp = p->next;
+
+		free(p->key);
+		free(p->content);
+		free(p);
+	}
 }
 
 void
