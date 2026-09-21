@@ -23,7 +23,7 @@ struct reference 	*new_ref(char *);
 void 			 free_list(struct reference *);
 int 			 create_key(struct reference *, struct reference *);
 void 			 read_key(struct reference *, char *);
-int 			 delete_key(struct reference *, char *);
+int 			 delete_key(struct reference **, char *);
 
 int 			 write_list(char *, struct reference *);
 
@@ -35,10 +35,7 @@ main(int argc, char *argv[])
 	int ret;
 	char *arg;
 
-	int cflag;
-	int dflag;
-	int rflag;
-	int uflag;
+	int cflag, dflag, rflag, uflag;
 	char *dbpath, *inpath;
 	struct reference *dblist, *inlist;
 
@@ -114,7 +111,7 @@ main(int argc, char *argv[])
 		}
 		modified += 1;
 	} else if (dflag) {
-		if ((delete_key(dblist, arg)) == -1) {
+		if ((delete_key(&dblist, arg)) == -1) {
 			fprintf(stderr, "key not found: %s\n", arg);
 			ret = EXIT_FAILURE;
 		}
@@ -157,7 +154,7 @@ parse_bib(char *path)
 	struct reference *rhead, *rlast;
 	struct buffer buf = {0};
 
-	fp = fopen(path, "r+");
+	fp = fopen(path, "r");
 	if (!fp) {
 		warn("cannot open %s", path);
 		return NULL;
@@ -287,17 +284,17 @@ read_key(struct reference *dblist, char *key)
 }
 
 int
-delete_key(struct reference *dblist, char *key)
+delete_key(struct reference **head, char *key)
 {
 	struct reference *p, *prev;
 
 	prev = NULL;
-	for (p = dblist; p; p = p->next) {
+	for (p = *head; p; p = p->next) {
 		if (!strcmp(key, p->key)) {
-			if (p == dblist) 
-				dblist = p->next;
-			else 
+			if (prev)
 				prev->next = p->next;
+			else
+				*head = p->next;
 			printf("Deleted %s\n", p->key);
 			free(p->key);
 			free(p->content);
@@ -361,7 +358,7 @@ usage(void)
     fprintf(stderr, "\n");
     fprintf(stderr, "  -f dbfile   database file (required)\n");
     fprintf(stderr, "  -c file     create: add entries from file ('-' reads stdin)\n");
-    fprintf(stderr, "  -r key      read: print entry for this key\n");
+    fprintf(stderr, "  -r key      read: print entry for this key ('-' prints all)\n");
     fprintf(stderr, "  -u key      update: replace entry 'key' with an entry read from stdin\n");
     fprintf(stderr, "  -d key      delete: remove entry with this key\n");
 }
