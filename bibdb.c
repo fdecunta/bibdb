@@ -192,6 +192,7 @@ parse_bib(char *path)
 			}
 		}
 
+		/* TODO: this is a bug. if not ends with newline this breaks */
 		if (inflag && !depth && c == '\n')  {
 			buf.text[--buf.pos] = '\0';
 			struct reference *r = new_ref(buf.text);
