@@ -13,7 +13,7 @@ struct reference {
 };
 
 struct buffer {
-	char text[MAX_BUF];
+	char text[MAX_BUF + 1];
 	int pos;
 };
 
@@ -107,16 +107,19 @@ main(int argc, char *argv[])
 		if (!inlist) {
 			warnx("failed to read references from %s", inpath);
 			ret = EXIT_FAILURE;
+			goto done;
 		}
 		if (create_key(dblist, inlist) == 0) {
 			warnx("no references added");
 			ret = EXIT_FAILURE;
+			goto done;
 		}
 		modified += 1;
 	} else if (dflag) {
 		if ((delete_key(&dblist, arg)) == -1) {
 			fprintf(stderr, "key not found: %s\n", arg);
 			ret = EXIT_FAILURE;
+			goto done;
 		}
 		modified += 1;
 	} else if (lflag) {
@@ -128,15 +131,15 @@ main(int argc, char *argv[])
 	}
 
 	if (modified) {
-		if ((write_list(dbpath, dblist)) < 1) {
+		if ((write_list(dbpath, dblist)) == -1) {
 			warnx("failed during writing");
 			ret = EXIT_FAILURE;
 		} 
 	}
 
+done:
 	free_list(dblist);
-	if (inlist)
-		free_list(inlist);
+	free_list(inlist);
 
 	exit(ret);
 }
@@ -170,53 +173,56 @@ parse_bib(char *path)
 	while ((c = fgetc(fp)) != EOF) {
 		if (c == '\n')
 			line += 1;
-		else if (inflag && c == '{')
-			depth++;
-		else if (inflag && c == '}') {
-			if (depth == 0) 
-				errx(EXIT_FAILURE, "unbalanced curly braces at line: %d", line);
-			depth--;
-		}
 
 		if (!inflag && c == '@')
 			inflag = 1;
 
-		if (inflag)  {
+		if (inflag) {
 			if (buf.pos < MAX_BUF)
 				buf.text[buf.pos++] = (char)c;
 			else {
 				warnx("line too long for buffer:\n\n%s...", buf.text);
-				free_list(rhead);
-				fclose(fp);
-				return NULL;
-			}
-		}
-
-		/* TODO: this is a bug. if not ends with newline this breaks */
-		if (inflag && !depth && c == '\n')  {
-			buf.text[--buf.pos] = '\0';
-			struct reference *r = new_ref(buf.text);
-			if (r == NULL) {
-				warnx("failed to create reference");
-				free_list(rhead);
-				fclose(fp);
-				return NULL;
+				goto fail;
 			}
 
-			if (!rhead)
-				rhead = r;
-			if (rlast)
-				rlast->next = r;
-			rlast = r;
+			if (c == '{')
+				depth++;
 
-			memset(buf.text, '\0', MAX_BUF);
-			buf.pos = 0;
-			inflag = 0;
+			if (c == '}') {
+				if (depth == 0) {
+					warnx("unbalanced curly braces at line: %d", line);
+					goto fail;
+				}
+				depth--;
+			}
+		
+			if (!depth && c == '}')  {
+				buf.text[buf.pos] = '\0';
+				struct reference *r = new_ref(buf.text);
+				if (r == NULL) {
+					warnx("failed to create reference");
+					goto fail;
+				}
+
+				if (!rhead)
+					rhead = r;
+				if (rlast)
+					rlast->next = r;
+				rlast = r;
+
+				buf.pos = 0;
+				inflag = 0;
+			}
 		}
 	} 
 
 	fclose(fp);
 	return rhead;
+
+fail:
+	free_list(rhead);
+	fclose(fp);
+	return NULL;
 }
 
 struct reference *
@@ -265,8 +271,12 @@ create_key(struct reference *dblist, struct reference *inlist)
 
 			if (!dbp->next) {
 				dbp->next = new_ref(inp->content);
-				changes += 1;
-				printf("Add %s\n", inp->key);
+				if (!dbp->next) 
+					warnx("cannot create new key: %s", inp->key);
+				else {
+					changes += 1;
+					printf("Add %s\n", inp->key);
+				}
 				break;
 			}
 		}
@@ -323,7 +333,6 @@ delete_key(struct reference **head, char *key)
 int
 write_list(char *path, struct reference *dblist)
 {
-	int writes = 0;
 	int fd; 	/* file descriptor for tmp file */
 	struct reference *p;
 	char tmp[] = "bibdb.XXXXXX";
@@ -333,17 +342,22 @@ write_list(char *path, struct reference *dblist)
 		return -1;
 	}
 
-	for (p = dblist; p; p = p->next, writes++)
-		dprintf(fd, "%s\n", p->content); 
-	close(fd);
-	
-	if ((rename(tmp, path)) != 0) {
+	for (p = dblist; p; p = p->next) {
+		if ((dprintf(fd, "%s\n", p->content)) < 1) {
+			warn("cannot write into %s", tmp);
+			close(fd);
+			unlink(tmp);
+			return -1;
+		}
+	}
+
+	if ((close(fd)) == -1 || (rename(tmp, path)) != 0) {
 		warn("cannot overwrite %s", path);
 		unlink(tmp);
 		return -1;
 	}
 
-	return writes;
+	return 0;
 }
 
 void
