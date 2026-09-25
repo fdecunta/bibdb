@@ -1,4 +1,8 @@
+#include <sys/stat.h>
+
 #include <err.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -333,9 +337,28 @@ delete_key(struct reference **head, char *key)
 int
 write_list(char *path, struct reference *dblist)
 {
-	int fd; 	/* file descriptor for tmp file */
+	int fd;
 	struct reference *p;
-	char tmp[] = "bibdb.XXXXXX";
+	struct stat st;
+	char *slash;
+	char tmp[PATH_MAX];
+
+	/* save the original permissions */
+	if (stat(path, &st) == -1) {
+		if (errno != ENOENT)
+			warn("stat %s", path);
+		mode_t mask = umask(0);
+		umask(mask);
+		st.st_mode = 0666 & ~mask;
+	}
+
+	/* tmp in the same directory as the db so rename() stays on one fs */
+	slash = strrchr(path, '/');
+	if (slash)
+		snprintf(tmp, sizeof(tmp), "%.*s/.bibdb.XXXXXX", 
+			(int)(slash - path), path);
+	else
+		snprintf(tmp, sizeof(tmp), ".bibdb.XXXXXX");
 
 	if ((fd = mkstemp(tmp)) == -1) {
 		warn("cannot create tmp file");
@@ -343,7 +366,7 @@ write_list(char *path, struct reference *dblist)
 	}
 
 	for (p = dblist; p; p = p->next) {
-		if ((dprintf(fd, "%s\n", p->content)) < 1) {
+		if (dprintf(fd, "%s\n", p->content) < 0) {
 			warn("cannot write into %s", tmp);
 			close(fd);
 			unlink(tmp);
@@ -351,7 +374,19 @@ write_list(char *path, struct reference *dblist)
 		}
 	}
 
-	if ((close(fd)) == -1 || (rename(tmp, path)) != 0) {
+	if (fchmod(fd, st.st_mode & 07777) == -1) {
+		warn("cannot set permissions");
+		close(fd);
+		unlink(tmp);
+		return -1;
+	}
+
+	if (close(fd) == -1) {
+		warn("close %s", tmp);
+		unlink(tmp);
+		return -1;
+	}
+	if (rename(tmp, path) == -1) {
 		warn("cannot overwrite %s", path);
 		unlink(tmp);
 		return -1;
