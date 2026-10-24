@@ -1,0 +1,83 @@
+.Dd October 24, 2026
+.Dt BIBDB 1
+.Os
+.Sh NAME
+.Nm bibdb
+.Nd create, read and delete entries in a bibtex database
+.Sh SYNOPSIS
+.Nm
+.Fl f Ar dbfile
+.Pq Fl c Ar file | Fl d Ar key | Fl l | Fl r Ar key
+.Sh DESCRIPTION
+.Nm
+maintains a small BibTeX database file.
+Entries are added from a file or from standard input, printed, deleted
+and listed.
+Each entry is identified by its citation key: the text between the
+opening brace of the entry and the first comma, as in
+.Bd -literal -offset indent
+@article{knuth1984,
+.Ed
+.Pp
+Whitespace around the key is ignored.
+Keys must be unique; entries whose key already exists are not added
+again, and a warning is printed for each duplicate.
+.Pp
+When the database is modified, it is rewritten atomically through a
+temporary file in the same directory, and the original file permissions
+are preserved.
+.Sh OPTIONS
+.Bl -tag -width 10n
+.It Fl f Ar dbfile
+Use
+.Ar dbfile
+as the database file.
+Required.
+.It Fl c Ar file
+Add every entry found in
+.Ar file
+to the database.
+If
+.Ar file
+is
+.Dq - ,
+entries are read from standard input.
+.It Fl r Ar key
+Print the entry with citation key
+.Ar key .
+If
+.Ar key
+is
+.Dq - ,
+print all entries.
+.It Fl d Ar key
+Delete the entry with citation key
+.Ar key .
+.It Fl l
+List all citation keys, one per line.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+Add the entries in
+.Pa new.bib
+to
+.Pa refs.bib ,
+then list all keys:
+.Bd -literal -offset indent
+$ bibdb -f refs.bib -c new.bib
+$ bibdb -f refs.bib -l
+.Ed
+.Pp
+Add an entry read from standard input:
+.Bd -literal -offset indent
+$ echo '@misc{torvalds1991, title={Linux}}' | bibdb -f refs.bib -c -
+Add torvalds1991
+.Ed
+.Pp
+Read and then delete an entry:
+.Bd -literal -offset indent
+$ bibdb -f refs.bib -r torvalds1991
+$ bibdb -f refs.bib -d torvalds1991
+Deleted torvalds1991
+.Ed

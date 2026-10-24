@@ -3,8 +3,10 @@ FLAGS = -Wall -Wextra -Werror -Wconversion -g
 
 PROG = bibdb
 SRC  = bibdb.c
+MAN  = bibdb.1
 
-BIN  = /usr/local/bin
+BINDIR  = /usr/local/bin
+MANDIR  = /usr/local/man/man1
 
 $(PROG): $(SRC)
 	$(CC) $(FLAGS) $(SRC) -o $(PROG)
@@ -13,15 +15,12 @@ clean:
 	rm -f $(PROG)
 
 install: $(PROG)
-	cp $(PROG) $(BIN)
+	cp $(PROG) $(BINDIR)
+	mkdir -p $(MANDIR)
+	cp $(MAN) $(MANDIR)/$(MAN)
 
 remove:
-	rm -f $(BIN)/$(PROG)
-
-run: $(PROG)
-	./$(PROG) -f bla.bib -c vks.bib
-
-mem: $(PROG)
-	valgrind --leak-check=yes ./$(PROG) -f foo.bib -r -
+	rm -f $(BINDIR)/$(PROG)
+	rm -f $(MANDIR)/$(MAN)
 
 .PHONY: install remove clean 
